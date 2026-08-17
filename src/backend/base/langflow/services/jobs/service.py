@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from lfx.graph.exceptions import GraphPausedException
+from lfx.observability import inject_trace_carrier
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import col, func, select
 
@@ -181,6 +182,12 @@ class JobService(Service):
                 asset_type=asset_type,
                 user_id=user_id,
                 dedupe_key=dedupe_key,
+                # The queued run happens after this request returns, in a worker that may be
+                # a different process, so contextvars cannot carry the trace there. Stamping
+                # it on the row is what lets the run link back to the request that caused it.
+                # Written once, here, and never rewritten: job_metadata is saved back whole,
+                # and a second writer on the pause path would race the one already there.
+                job_metadata=inject_trace_carrier() or None,
             )
             session.add(job)
             await session.flush()
